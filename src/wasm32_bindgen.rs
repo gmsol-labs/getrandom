@@ -19,7 +19,7 @@ use js_sys::Uint8Array;
 extern crate bindgen as wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
-use crate::error::{BINDGEN_CRYPTO_UNDEF, BINDGEN_GRV_UNDEF};
+use crate::error::{BINDGEN_CRYPTO_UNDEF, BINDGEN_GRV_UNDEF, UNSUPPORTED};
 use crate::Error;
 
 const CHUNK_SIZE: usize = 256;
@@ -86,7 +86,21 @@ fn getrandom_init() -> Result<RngSource, Error> {
         return Ok(RngSource::Browser(crypto, buf));
     }
 
-    return Ok(RngSource::Node(MODULE.require("crypto")));
+    #[cfg(not(target_feature = "atomics"))]
+    {
+        // Single-threaded wasm: keep the legacy Node.js fallback.
+        // This code path relies on `MODULE.require("crypto")`, which is only
+        // available in non-atomics builds.
+        return Ok(RngSource::Node(MODULE.require("crypto")));
+    }
+
+    #[cfg(target_feature = "atomics")]
+    {
+        // Atomics-enabled wasm (browser/worker target): do not compile the Node.js
+        // fallback to avoid compile-time "method not found" errors (e.g. no
+        // `require` available in this build). Fail explicitly instead.
+        return Err(UNSUPPORTED);
+    }
 }
 
 #[wasm_bindgen]
